@@ -70,7 +70,7 @@ async fn query_uptime(domain: &str) -> Result<UptimeResponse, prometheus_http_qu
 
 	let client = Client::try_from(CONFIG.prometheus_url.clone())?;
 	let q = format!(
-		"max(max_over_time(probe_success{{job=~\"xmppobserve:xmpps?-(client|server)\", domain=\"zombofant.net\"}}[1h])) by (domain)",
+		"max(avg_over_time(probe_success{{job=~\"xmppobserve:xmpps?-(client|server)\", domain=\"zombofant.net\"}}[1h])) by (domain)",
 	);
 	let t1 = std::time::SystemTime::now()
 		.duration_since(std::time::SystemTime::UNIX_EPOCH)
