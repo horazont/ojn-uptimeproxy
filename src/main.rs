@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use poem::{get, handler, listener::TcpListener, web::{Path, Json}, IntoResponse, Route, Server, http::StatusCode};
+use poem::{
+	get, handler,
+	http::StatusCode,
+	listener::TcpListener,
+	web::{Json, Path},
+	IntoResponse, Route, Server,
+};
 
-use figment::{Figment, providers::{Env}};
+use figment::{providers::Env, Figment};
 
 use prometheus_http_query::Client;
 
@@ -29,8 +35,11 @@ struct ErrorResponse {
 }
 
 #[derive(Serialize)]
+#[serde(tag = "status")]
 enum Response {
+	#[serde(rename = "success")]
 	Success(UptimeResponse),
+	#[serde(rename = "error")]
 	Error(ErrorResponse),
 }
 
@@ -63,14 +72,20 @@ async fn query_uptime(domain: &str) -> Result<UptimeResponse, prometheus_http_qu
 	let q = format!(
 		"max(max_over_time(probe_success{{job=~\"xmppobserve:xmpps?-(client|server)\", domain=\"zombofant.net\"}}[1h])) by (domain)",
 	);
-	let t1 = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_secs();
+	let t1 = std::time::SystemTime::now()
+		.duration_since(std::time::SystemTime::UNIX_EPOCH)
+		.unwrap()
+		.as_secs();
 	let t1 = t1 - (t1 % 3600);
-	let t0 = t1 - 3600*24*NDAYS;
+	let t0 = t1 - 3600 * 24 * NDAYS;
 
-	let response = client.query_range(q, t0 as i64, t1 as i64, 3600.0).get().await?;
+	let response = client
+		.query_range(q, t0 as i64, t1 as i64, 3600.0)
+		.get()
+		.await?;
 	let series = response.data().as_matrix().expect("matrix result");
 	let mut samples = Vec::new();
-	samples.resize(24*NDAYS as usize + 1, None);
+	samples.resize(24 * NDAYS as usize + 1, None);
 	for sample in series[0].samples() {
 		let bucket = ((sample.timestamp() - t0 as f64) as i64) / 3600;
 		if bucket < 0 {
@@ -80,22 +95,32 @@ async fn query_uptime(domain: &str) -> Result<UptimeResponse, prometheus_http_qu
 			*dest = Some(sample.value());
 		}
 	}
-	Ok(UptimeResponse{domain: domain.into(), t0, uptime_history: samples})
+	Ok(UptimeResponse {
+		domain: domain.into(),
+		t0,
+		uptime_history: samples,
+	})
 }
 
 #[handler]
 async fn uptime(Path(domain): Path<String>) -> (StatusCode, Json<Response>) {
 	if !CONFIG.domain_allowlist.contains(&domain) {
-		return (StatusCode::NOT_FOUND, Json(Response::Error(ErrorResponse{
-			message: format!("domain {} is not tracked", domain),
-		})))
+		return (
+			StatusCode::NOT_FOUND,
+			Json(Response::Error(ErrorResponse {
+				message: format!("domain {} is not tracked", domain),
+			})),
+		);
 	}
 
 	match query_uptime(&domain).await {
 		Ok(v) => (StatusCode::OK, Json(Response::Success(v))),
-		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(Response::Error(ErrorResponse{
-			message: e.to_string(),
-		}))),
+		Err(e) => (
+			StatusCode::INTERNAL_SERVER_ERROR,
+			Json(Response::Error(ErrorResponse {
+				message: e.to_string(),
+			})),
+		),
 	}
 }
 
